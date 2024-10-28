@@ -1,0 +1,392 @@
+---
+title: "Panel regression Hospitalizations"
+author: "JL-Herrera"
+date: "2024-10-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(cowplot)
+library(plm)
+```
+
+Here I describe the procedure I am using to perform panel regression to my data. My objective is to see if time (week), SVI, mobility ratio, are good predictors for hospitalizations in each zip code.
+
+### Data
+This is the data I have
+```{r cars}
+allCounties <-read_csv("~/Documents/GitHub/MobilityAndSVIModels/dataModelSVI_MR_Hops.csv")
+# Convert data to a panel data frame
+data_panel <- pdata.frame(allCounties, index = c("Zip", "week"))
+#Since we know that SVI impacts the effect of mobility on hospitalizations and potentially
+#hospitalizations, we include an interaction term between SVI and mobility ratio
+# Create interaction term in the dataset
+data_panel$SVI_mobInteraction <- data_panel$SVI_State * data_panel$mobRatioOut_mean
+data_panel
+```
+
+### Models
+
+I explored basic models, but the models I am interested in is:
+
+SVI_State: SVI of each zip code, calculated comparing with zip codes from all TX.
+mobRatioOut_mean: mobility ratio - out, this is the change of out-visits from the home zip code
+SVI_mobInteraction: interaction term (SVI*Mobility), since we know, from our previous results in the paper, that SVI affects mobility
+week: category variable to capture trends over weeks
+we use the population of each zip code as offset, to get hospitalizations per unit population
+
+
+I tried ended up with to models: fixed effects and random effects, which look very similar to me and is where I would like your help.
+
+#### Fixed effects model
+```{r pressure, echo=FALSE}
+#Fixed Effects Model : This model will include a numeric time variable to capture a 
+#trend over weeks and control for unobserved heterogeneity across zip codes.
+# Fixed effects model with interaction term and population as offset
+fixed_model_interaction_off <- plm(Hosp_least ~ SVI_State + mobRatioOut_mean + SVI_mobInteraction + 
+                                 week + offset(log(pop2019)), 
+                               data = data_panel, 
+                               model = "within")
+summary(fixed_model_interaction_off)
+```
+
+I obtain this results. I basically understand the results and coefficient make sense:
+mobRatioOut_mean estimate 2.079204. For each unit increase in mobRatioOut_mean, the expected number of hospitalizations (per unit of population, due to the offset) increases by approximately 2.08, holding other factors constant. This is statistically significant (p < 2.2e-16).
+
+SVI_mobInteraction estimate -2.501211. For each unit increase in the interaction of the SVI and mobility ratio, the expected number of hospitalizations decreases by approximately 2.50, controlling for other variables. This suggests that higher mobility in areas with higher social vulnerability might lead to lower hospitalizations, possibly indicating a complex interplay between mobility and vulnerability. Statistically significant (p = 1.462e-13).
+
+Weeks (week2 to week48). The coefficients for the weeks show a increasing trend in hospitalizations over time, particularly from week 19 onwards, with estimates ranging from about 1.8 to over 7.2 for certain weeks. The significance levels for these coefficients are very high (all p < 0.001), indicating that hospitalizations significantly increase as time progresses, which makes sense.
+
+Now, for the model fit part: 
+R-Squared: 0.34503, indicating that approximately 34.5% of the variance in the dependent variable (hospitalizations) is explained by the model. While not extremely high, it suggests that the model captures a substantial amount of variability. And the Adjusted R-Squared: 0.32719, then adding additional predictors is not inflating the model’s explanatory power excessively.
+
+F-statistic: 88.4031 on 49 and 8223 DF, p-value < 2.22e-16, then, it appears that the overall model is statistically significant, meaning at least one of the predictors is associated with the dependent variable.
+
+#### Random effects model
+
+```{r}
+#Random Effects Model (for Comparison) : To see if a random effects model might be more 
+#appropriate, you can try a random effects regression. You can later compare this to the 
+#fixed effects model using a Hausman test.
+# Random effects model
+random_model <- plm(Hosp_least ~ SVI_State + mobRatioOut_mean + SVI_mobInteraction +
+                      week + offset(log(pop2019)), 
+                    data = data_panel, 
+                    model = "random")
+summary(random_model)
+```
+
+#### Comparing models
+
+To compare fixed effects and random effects models, we use the Hausman test, which is specifically designed to determine whether the unique errors (the time-invariant characteristics) are correlated with the regressors. The Hausman test compares the fixed effects and random effects models. If the test is significant, it suggests that the fixed effects model is more appropriate (since it assumes correlation between the individual effects and the regressors), while a non-significant result suggests that the random effects model is suitable.
+
+```{r}
+hausman_test <- phtest(fixed_model_interaction_off, random_model)
+print(hausman_test)
+```
+
+Up to now, it looks like the random effects model is a better model. Now, I will see some diagnostic plots
+
+#### Diagnostics
+
+```{r}
+# Fitted values and residuals for random effects model
+fitted_values <- fitted(random_model)
+residuals <- resid(random_model)
+
+#Residuals vs. Fitted Plot
+fig1<-ggplot(data = data.frame(fitted = fitted_values, residuals = residuals), aes(x = fitted, y = residuals)) +
+  geom_point() +
+  geom_smooth(method = "loess", color = "blue", se = FALSE) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Residuals vs Fitted", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+#Q-Q Plot
+# Create a data frame for the plot
+fig2<-ggplot(data = data.frame(sample = residuals), aes(sample = sample)) +
+  stat_qq() +
+  stat_qq_line(color = "red", linetype = "dashed") +
+  labs(title = "Q-Q Plot of Residuals", x = "Theoretical Quantiles", y = "Sample Quantiles") +
+  theme_minimal()
+#Residual Density Plot
+fig3<-ggplot(data = data.frame(residuals = residuals), aes(x = residuals)) +
+  geom_histogram(aes(y = ..density..), bins = 30, fill = "skyblue", color = "black") +
+  geom_density(color = "red", size = 1) +
+  labs(title = "Residual Density Plot", x = "Residuals", y = "Density") +
+  theme_minimal()
+#Scale-Location Plot
+std_residuals <- residuals / sd(residuals)  # Standardized residuals
+fig4<-ggplot(data = data.frame(fitted = fitted_values, std_residuals = abs(std_residuals)), aes(x = fitted, y = std_residuals)) +
+  geom_point() +
+  geom_smooth(method = "loess", color = "blue", se = FALSE) +
+  labs(title = "Scale-Location Plot", x = "Fitted Values", y = "Standardized Residuals") +
+  theme_minimal()
+
+plot_grid(fig1,fig2,fig3,fig4,ncol=2)
+```
+
+
+```{r}
+# Residuals vs. Time (or any other variable like week)
+ggplot(data = data.frame(time = data_panel$week, residuals = residuals), aes(x = time, y = residuals)) +
+  geom_point(color = "blue", alpha = 0.5) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Residuals vs. Time", x = "Time (Week)", y = "Residuals") +
+  theme_minimal()
+```
+
+#### Fixing overdispersion
+
+Since I see that my models has over dispersion, I try to address this by using a negative binomial model. However, the negative binomial model with random effect does not run. It gives me the following error and I have no idea how (if possible) to fix it
+
+```{r}
+library(glmmTMB)
+nb_model <- glmmTMB(Hosp_least ~ SVI_State + mobRatioOut_mean + SVI_mobInteraction + 
+                      week + offset(log(pop2019)) + (1 | Zip), 
+                    data = data_panel, 
+                    family = nbinom2)
+```
+
+Then, I use a simple negative binomial model without random effects
+
+```{r}
+# Fit a simpler model without random effects
+simple_nb_model <- glmmTMB(Hosp_least ~ SVI_State + mobRatioOut_mean + 
+                          SVI_mobInteraction + week + 
+                          offset(log(pop2019)), 
+                        data = data_panel, 
+                        family = nbinom2)
+
+summary(simple_nb_model)
+```
+
+In this case, temporal effects are not significant. Here are the diagnostic plots
+
+```{r}
+# Fitted values and residuals for random effects model
+fitted_values <- fitted(simple_nb_model)
+residuals <- resid(simple_nb_model)
+
+#Residuals vs. Fitted Plot
+fig1<-ggplot(data = data.frame(fitted = fitted_values, residuals = residuals), aes(x = fitted, y = residuals)) +
+  geom_point() +
+  geom_smooth(method = "loess", color = "blue", se = FALSE) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Residuals vs Fitted", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+#Q-Q Plot
+# Create a data frame for the plot
+fig2<-ggplot(data = data.frame(sample = residuals), aes(sample = sample)) +
+  stat_qq() +
+  stat_qq_line(color = "red", linetype = "dashed") +
+  labs(title = "Q-Q Plot of Residuals", x = "Theoretical Quantiles", y = "Sample Quantiles") +
+  theme_minimal()
+#Residual Density Plot
+fig3<-ggplot(data = data.frame(residuals = residuals), aes(x = residuals)) +
+  geom_histogram(aes(y = ..density..), bins = 30, fill = "skyblue", color = "black") +
+  geom_density(color = "red", size = 1) +
+  labs(title = "Residual Density Plot", x = "Residuals", y = "Density") +
+  theme_minimal()
+#Scale-Location Plot
+std_residuals <- residuals / sd(residuals)  # Standardized residuals
+fig4<-ggplot(data = data.frame(fitted = fitted_values, std_residuals = abs(std_residuals)), aes(x = fitted, y = std_residuals)) +
+  geom_point() +
+  geom_smooth(method = "loess", color = "blue", se = FALSE) +
+  labs(title = "Scale-Location Plot", x = "Fitted Values", y = "Standardized Residuals") +
+  theme_minimal()
+
+plot_grid(fig1,fig2,fig3,fig4,ncol=2)
+
+```
+
+#### Other idea
+Now, my data has lots of zero values
+```{r}
+zero_count <- sum(data_panel$Hosp_least == 0)
+total_count <- nrow(data_panel)
+proportion_zeros <- zero_count / total_count
+proportion_zeros
+```
+
+Then, one option is to try with a zero-inflated model. However, same problem as in the negative binomial with random effects.
+
+```{r}
+# Fit ZINB model
+zinb_model <- glmmTMB(Hosp_least ~ SVI_State + mobRatioOut_mean + 
+                        SVI_mobInteraction + week + 
+                        offset(log(pop2019)) + (1 | Zip),
+                      data = data_panel,
+                      family = nbinom2,
+                      ziformula = ~ 1)  # Adjust ziformula if you want to include other predictors for inflation
+```
+Simpler zero-inflated model
+
+```{r}
+zinb_simple_model <- glmmTMB(Hosp_least ~ SVI_State + mobRatioOut_mean + 
+                              SVI_mobInteraction + week + 
+                              offset(log(pop2019)),
+                              data = data_panel,
+                              family = nbinom2,
+                              ziformula = ~ 1)  # You can modify this formula to include predictors for zero-inflation if needed
+summary(zinb_simple_model)
+```
+
+```{r}
+# Fitted values and residuals for random effects model
+fitted_values <- fitted(zinb_simple_model)
+residuals <- resid(zinb_simple_model)
+
+#Residuals vs. Fitted Plot
+fig1<-ggplot(data = data.frame(fitted = fitted_values, residuals = residuals), aes(x = fitted, y = residuals)) +
+  geom_point() +
+  geom_smooth(method = "loess", color = "blue", se = FALSE) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Residuals vs Fitted", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+#Q-Q Plot
+# Create a data frame for the plot
+fig2<-ggplot(data = data.frame(sample = residuals), aes(sample = sample)) +
+  stat_qq() +
+  stat_qq_line(color = "red", linetype = "dashed") +
+  labs(title = "Q-Q Plot of Residuals", x = "Theoretical Quantiles", y = "Sample Quantiles") +
+  theme_minimal()
+#Residual Density Plot
+fig3<-ggplot(data = data.frame(residuals = residuals), aes(x = residuals)) +
+  geom_histogram(aes(y = ..density..), bins = 30, fill = "skyblue", color = "black") +
+  geom_density(color = "red", size = 1) +
+  labs(title = "Residual Density Plot", x = "Residuals", y = "Density") +
+  theme_minimal()
+#Scale-Location Plot
+std_residuals <- residuals / sd(residuals)  # Standardized residuals
+fig4<-ggplot(data = data.frame(fitted = fitted_values, std_residuals = abs(std_residuals)), aes(x = fitted, y = std_residuals)) +
+  geom_point() +
+  geom_smooth(method = "loess", color = "blue", se = FALSE) +
+  labs(title = "Scale-Location Plot", x = "Fitted Values", y = "Standardized Residuals") +
+  theme_minimal()
+
+plot_grid(fig1,fig2,fig3,fig4,ncol=2)
+
+```
+
+But, my model shows a warning that might ocurr due to multicolinearity among my variables. I check this
+```{r}
+library(car)
+vif_values <- vif(lm(Hosp_least ~ SVI_State + mobRatioOut_mean + SVI_mobInteraction + week, data = data_panel))
+print(vif_values)
+```
+
+Which shows
+SVI_State: VIF = 5.25
+mobRatioOut_mean: VIF = 5.34
+SVI_mobInteraction: VIF = 8.29 (highly concerning)
+week: VIF = 2.23 (acceptable)
+
+I will test by removing the interaction term
+
+```{r}
+zinb_simple_model_WO_inter <- glmmTMB(Hosp_least ~ SVI_State + mobRatioOut_mean + 
+                              week + offset(log(pop2019)),
+                              data = data_panel,
+                              family = nbinom2,
+                              ziformula = ~ 1)  # You can modify this formula to include predictors for zero-inflation if needed
+summary(zinb_simple_model_WO_inter)
+```
+
+```{r}
+# Fitted values and residuals for random effects model
+fitted_values <- fitted(zinb_simple_model_WO_inter)
+residuals <- resid(zinb_simple_model_WO_inter)
+
+#Residuals vs. Fitted Plot
+fig1<-ggplot(data = data.frame(fitted = fitted_values, residuals = residuals), aes(x = fitted, y = residuals)) +
+  geom_point() +
+  geom_smooth(method = "loess", color = "blue", se = FALSE) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Residuals vs Fitted", x = "Fitted Values", y = "Residuals") +
+  theme_minimal()
+#Q-Q Plot
+# Create a data frame for the plot
+fig2<-ggplot(data = data.frame(sample = residuals), aes(sample = sample)) +
+  stat_qq() +
+  stat_qq_line(color = "red", linetype = "dashed") +
+  labs(title = "Q-Q Plot of Residuals", x = "Theoretical Quantiles", y = "Sample Quantiles") +
+  theme_minimal()
+#Residual Density Plot
+fig3<-ggplot(data = data.frame(residuals = residuals), aes(x = residuals)) +
+  geom_histogram(aes(y = ..density..), bins = 30, fill = "skyblue", color = "black") +
+  geom_density(color = "red", size = 1) +
+  labs(title = "Residual Density Plot", x = "Residuals", y = "Density") +
+  theme_minimal()
+#Scale-Location Plot
+std_residuals <- residuals / sd(residuals)  # Standardized residuals
+fig4<-ggplot(data = data.frame(fitted = fitted_values, std_residuals = abs(std_residuals)), aes(x = fitted, y = std_residuals)) +
+  geom_point() +
+  geom_smooth(method = "loess", color = "blue", se = FALSE) +
+  labs(title = "Scale-Location Plot", x = "Fitted Values", y = "Standardized Residuals") +
+  theme_minimal()
+
+plot_grid(fig1,fig2,fig3,fig4,ncol=2)
+
+```
+
+
+Now, I want to compare these three models I created:
+
+Calculate AIC for Random Effects Model Manually
+```{r}
+# Extract residual sum of squares and number of parameters from the random model
+residuals_random <- resid(random_model)
+rss_random <- sum(residuals_random^2)
+n_random <- length(residuals_random)
+k_random <- length(coef(random_model))  # Number of parameters
+
+# Calculate log-likelihood
+logLik_random <- -n_random/2 * (log(2 * pi) + log(rss_random/n_random) + 1)
+
+# Calculate AIC
+aic_random <- -2 * logLik_random + 2 * k_random
+
+# Print AIC
+print(paste("AIC for Random Effects Model:", aic_random))
+```
+
+```{r}
+# AIC for negative binomial and zero-inflated models
+aic_nb <- AIC(simple_nb_model)
+aic_zinb <- AIC(zinb_simple_model)
+aic_zinb_WO <- AIC(zinb_simple_model_WO_inter)
+
+# Combine results into a data frame
+aic_values <- data.frame(
+  Model = c("Random Effects", "Negative Binomial", "Zero-Inflated NB", "Zero-Inflated NB - WO interaction"),
+  AIC = c(aic_random, aic_nb, aic_zinb,aic_zinb_WO)
+)
+
+# Print AIC values
+print(aic_values)
+```
+
+Then, according to this, the best model for my data is the Zero-inflated negative binomial without random effects. According to what I see in the results above and the diagnostic plots,
+
+1- there is no statistical evidence showing that there is temporal effect in the hospitalizations
+2- strong predictors are SVI (positive), mobility (positive), and interaction SVI-mobility (negative)
+
+Now, I think this is the farthest I can get with my models by myself. Since Zero-inflated NB is the best model, can this be improved to have a "decent" performance?
+
+What I am trying to do is to have this model ready to include in the manuscript I am finishing now. So, I have to main questions:
+
+1- Do you think this analysis and the conclusion that the Zero-inflated NB model is the best is good to add it as is in my manuscript as one section for publication?
+2- Do you think the performance of the model could be improved? If so, would you be willing to make this analysis to publish this work?
+
+
+
+
+
+
+
+
+
+
+
