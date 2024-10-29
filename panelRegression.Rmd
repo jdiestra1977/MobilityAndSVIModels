@@ -368,9 +368,9 @@ aic_values <- data.frame(
 print(aic_values)
 ```
 
-Then, according to this, the best model for my data is the Zero-inflated negative binomial without random effects. According to what I see in the results above and the diagnostic plots,
+Then, according to this, the best model for my data is the Negative binomial without random effects. According to what I see in the results above and the diagnostic plots,
 
-1- there is no statistical evidence showing that there is temporal effect in the hospitalizations
+1- there is no statistical evidence showing that there is temporal effect in the hospitalizations. I expected 
 2- strong predictors are SVI (positive), mobility (positive), and interaction SVI-mobility (negative)
 
 Now, I think this is the farthest I can get with my models by myself. Since Zero-inflated NB is the best model, can this be improved to have a "decent" performance?
