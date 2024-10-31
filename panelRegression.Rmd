@@ -509,7 +509,7 @@ And now the model with everything
 ```{r}
 nb_model_std_and_lags <- glmmTMB(Hosp_least ~ SVI_State + mobRatioOut_std + #mobRatioIntra_std + 
                           mobRatioOut_std_lag1 + 
-                            mobRatioOut_std_lag2 + mobRatioOut_std_lag3 + mobRatioOut_std_lag4 + mobRatioOut_std_lag5 +
+                            mobRatioOut_std_lag2 + mobRatioOut_std_lag3 + mobRatioOut_std_lag4 + #mobRatioOut_std_lag5 +
                             SVI_State*mobRatioOut_std_lag3+
                           #mobRatioIntra_std_lag1 + mobRatioIntra_std_lag2 + mobRatioIntra_std_lag3 + mobRatioIntra_std_lag4 + mobRatioIntra_std_lag5 +
                           #Interaction_MobOutSVI_std + Interaction_MobIntraSVI_std +
