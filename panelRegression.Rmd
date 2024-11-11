@@ -633,23 +633,27 @@ plot_grid(fig1,fig2,fig3,fig4,ncol=2)
 #                     family = nbinom2)
 
 # Fit ZINB model
-zinb_model_std_new <- glmmTMB(Hosp_least ~ SVI_State + mobRatioOut_std_lag1 + 
+zinb_model_std_new <- glmmTMB(Hosp_least ~ SVI_State + mobRatioOut_std_lag1 + mobRatioOut_std_lag2 +
                             mobRatioOut_std_lag3 + mobRatioOut_std_lag4 + I(mobRatioOut_std_lag3^2) +
-                            SVI_State*mobRatioOut_std_lag3+
+                            SVI_State*mobRatioOut_std_lag3+ mobRatioOut_std_lag3*week +
                             (1 + mobRatioOut_std_lag3 | Zip) +
                       week + I(week^2) + offset(log(pop2019)), 
                     data = data_panel_with_std_lags, 
-                    family = nbinom2,
-                      ziformula = ~ 1)  # Adjust ziformula if you want to include other predictors for inflation
+                    family = nbinom2)#,ziformula = ~ 1)  # Adjust ziformula if you want to include other predictors for inflation
 summary(zinb_model_std_new)
 ```
 
+```{r}
+exp(confint(zinb_model_std_new))
+```
 
+```{r}
+library(modelsummary)
+library(dplyr)
+library(fixest)
+library(stringr)
 
-
-
-
-
+```
 
 
 
