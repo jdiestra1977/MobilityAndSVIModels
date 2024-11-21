@@ -647,13 +647,195 @@ summary(zinb_model_std_new)
 exp(confint(zinb_model_std_new))
 ```
 
+Some diagnostic plots to see how good is our model
+
+### Fitted vs. Observed Hospitalizations
 ```{r}
-library(modelsummary)
-library(dplyr)
-library(fixest)
-library(stringr)
+# Add fitted values to data
+
+model_data <- zinb_model_std_new$model  # Extract the model data
+model_data$fitted <- predict(zinb_model_std_new, type = "response")
+
+#model_data$fitted
+
+# Create a new data frame with observed values and fitted values
+plot_data <- data_panel_with_std_lags %>%
+  mutate(
+    fitted = predict(zinb_model_std_new, newdata = ., type = "response")
+  ) %>%
+  select(week, Zip, Hosp_least, fitted)  # Adjust variables as needed
+
+library(ggplot2)
+
+ggplot(plot_data, aes(x = week)) +
+  geom_line(aes(y = Hosp_least, color = "Observed")) +       # Observed values
+  geom_line(aes(y = fitted, color = "Fitted"), linetype = "dashed") +  # Fitted values
+  labs(y = "Hospitalizations", color = "Legend") +
+  scale_color_manual(values = c("Observed" = "blue", "Fitted" = "red")) +
+  theme_minimal() +
+  ggtitle("Observed vs. Fitted Hospitalizations Over Time") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Aggregate observed and fitted values across ZIP codes by week
+agg_data <- plot_data %>%
+  group_by(week) %>%
+  summarize(observed = sum(Hosp_least), fitted = sum(fitted))
+
+# Plot
+ggplot(agg_data, aes(x = week)) +
+  geom_line(aes(y = observed, color = "Observed")) +
+  geom_line(aes(y = fitted, color = "Fitted")) +
+  labs(title = "Aggregated Observed vs. Fitted Values Across ZIP Codes",
+       y = "Hospitalizations",
+       color = "Legend") +
+  theme_minimal()
+```
+
+```{r}
+# Define a subset of ZIP codes for plotting
+zip_subset <- unique(plot_data$Zip)[1:5]  # Modify to choose specific ZIP codes
+subset_data <- plot_data %>% filter(Zip %in% zip_subset)
+
+# Plot
+ggplot(subset_data, aes(x = week)) +
+  geom_line(aes(y = Hosp_least, color = "Observed")) +
+  geom_line(aes(y = fitted, color = "Fitted")) +
+  facet_wrap(~ Zip, scales = "free_y") +
+  labs(title = "Observed vs. Fitted Values for Selected ZIP Codes",
+       y = "Hospitalizations",
+       color = "Legend") +
+  theme_minimal()
+```
+
+```{r}
+# Plot with facets for each ZIP code
+this<-ggplot(plot_data, aes(x = week)) + theme_bw() +
+  geom_line(aes(y = Hosp_least, color = "Observed")) +
+  geom_line(aes(y = fitted, color = "Fitted")) +
+  facet_wrap(~ Zip, scales = "free_y") +
+  labs(title = "Observed vs. Fitted Values by ZIP Code",
+       y = "Hospitalizations",
+       color = "Legend") +
+#  theme_minimal() +
+  theme(legend.position = "bottom")
+
+ggsave(this,file="VerEsto.png",height = 30,width = 40)
 
 ```
+
+
+
+```{r}
+library(ggeffects)
+library(ggplot2)
+
+#1. Interaction Plot
+
+#This plot will show how the predicted hospitalizations change with the mobility ratio (3-week lag) for different values of SVI_State.
+
+# Generate predicted values for the interaction between SVI_State and mobility ratio lag 3
+effect_data <- ggpredict(zinb_model_std_new, terms = c("mobRatioOut_std_lag3", "SVI_State"))
+
+# Plot the interaction effect
+ggplot(effect_data, aes(x = x, y = predicted, color = group)) +
+  geom_line(size = 1) +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high, fill = group), alpha = 0.2) +
+  labs(
+    title = "Interaction Effect of Mobility Ratio (3-week lag) and SVI on Hospitalizations",
+    x = "Mobility Ratio (3-week lag)",
+    y = "Predicted Hospitalizations",
+    color = "SVI State",
+    fill = "SVI State"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "right")
+```
+
+
+```{r}
+#2. Marginal Effects Plot of Mobility Ratios
+
+#This plot shows the effect of each mobility ratio lag variable on hospitalizations independently.
+
+# Generate marginal effects for each mobility ratio lag
+effect_lag1 <- ggpredict(zinb_model_std_new, terms = "mobRatioOut_std_lag1")
+effect_lag2 <- ggpredict(zinb_model_std_new, terms = "mobRatioOut_std_lag2")
+effect_lag3 <- ggpredict(zinb_model_std_new, terms = "mobRatioOut_std_lag3")
+effect_lag4 <- ggpredict(zinb_model_std_new, terms = "mobRatioOut_std_lag4")
+
+# Combine plots into one layout using patchwork
+library(patchwork)
+
+p1 <- ggplot(effect_lag1, aes(x = x, y = predicted)) +
+  geom_line(color = "blue") +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, fill = "blue") +
+  labs(title = "Lag 1 Effect", x = "Mobility Ratio Lag 1", y = "Predicted Hospitalizations")
+
+p2 <- ggplot(effect_lag2, aes(x = x, y = predicted)) +
+  geom_line(color = "green") +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, fill = "green") +
+  labs(title = "Lag 2 Effect", x = "Mobility Ratio Lag 2", y = "Predicted Hospitalizations")
+
+p3 <- ggplot(effect_lag3, aes(x = x, y = predicted)) +
+  geom_line(color = "red") +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, fill = "red") +
+  labs(title = "Lag 3 Effect", x = "Mobility Ratio Lag 3", y = "Predicted Hospitalizations")
+
+p4 <- ggplot(effect_lag4, aes(x = x, y = predicted)) +
+  geom_line(color = "purple") +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, fill = "purple") +
+  labs(title = "Lag 4 Effect", x = "Mobility Ratio Lag 4", y = "Predicted Hospitalizations")
+
+plot_grid(p1,p2,p3,p4,ncol=2)
+#(p1 | p2) / (p3 | p4)
+```
+
+```{r}
+#4. Random Effects Plot by Zip
+
+#To show how the random effects for each ZIP code vary, use ranef to extract and plot them.
+
+# Generate marginal effects for week variable
+effect_week <- ggpredict(zinb_model_std_new, terms = c("week"))
+
+# Plot effect of week on hospitalizations
+ggplot(effect_week, aes(x = x, y = predicted)) +
+  geom_line(color = "darkorange") +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, fill = "darkorange") +
+  labs(
+    title = "Effect of Week on Predicted Hospitalizations",
+    x = "Week",
+    y = "Predicted Hospitalizations"
+  ) +
+  theme_minimal()
+```
+
+
+```{r}
+
+#6. Visualization of Non-linear Effects of mobRatioOut_std_lag3
+
+#If the effect of mobRatioOut_std_lag3 is quadratic, visualize it along with its squared term.
+
+# Generate marginal effects for the quadratic term
+effect_lag3_quad <- ggpredict(zinb_model_std_new, terms = c("mobRatioOut_std_lag3 [all]"))
+
+# Plot quadratic effect of lag 3
+ggplot(effect_lag3_quad, aes(x = x, y = predicted)) +
+  geom_line(color = "purple") +
+  geom_ribbon(aes(ymin = conf.low, ymax = conf.high), alpha = 0.2, fill = "purple") +
+  labs(
+    title = "Quadratic Effect of Mobility Ratio Lag 3 on Hospitalizations",
+    x = "Mobility Ratio Lag 3",
+    y = "Predicted Hospitalizations"
+  ) +
+  theme_minimal()
+
+```
+
+
+
+
 
 
 
